@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use calamine::{open_workbook, Reader, Xlsx};
+use serde::{Deserialize, Serialize};
 
 fn main() {
 
@@ -7,32 +10,8 @@ fn main() {
         arr_str.push(f);
     }
 
-    let mut excel: Xlsx<_> = open_workbook("test.xlsx").unwrap();
-    for sheet_name in excel.sheet_names(){
-        println!("{}", sheet_name);
-        
-        if let Ok(r) = excel.worksheet_range(&sheet_name){
-            let mut find_head_row = false;
-            println!("{}", r.rows().len());
-            for row in r.rows() {
-                //println!("len={}, row={:?} row[0]={} {}", row.len(), row, row[0], arr_str.len());
-                if find_head_row {
-                    println!("len={}, row={:?} row[0]={} {}", row.len(), row, row[0], arr_str.len());
-                }
-
-                if !find_head_row && row.len() == arr_str.len(){
-                    let mut find_cell_count = 0;
-                    for row_idx in 0..row.len(){
-                        if row[row_idx].to_string() == arr_str[row_idx].to_string(){
-                            find_cell_count = find_cell_count + 1;
-                        }
-                    }
-
-                    find_head_row = find_cell_count == arr_str.len();
-                }
-            }
-        }
-    }
+    println!("{}", get_data_from_excel("test.xlsx".to_string(), "1|2|3|4|5|6".to_string()));
+    
     // if let Some(Ok(r)) = excel.worksheet_range("Sheet1") {
     //     for row in r.rows() {
     //         println!("row={:?}, row[0]={:?}", row, row[0]);
@@ -53,6 +32,76 @@ fn main() {
     //println!("1 {}", xo("xxOo"));
     //println!("2 {}", xo("ooom"));
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ExcelData{
+    sheet_name: String,
+    rows: Vec<HashMap<String,String>>
+}
+
+fn find_key_for_value(map: &HashMap<String, usize>, value: usize) -> Option<String> {
+    map.iter().find_map(|(key, &val)| if val == value { Some(key.to_string()) } else { None })
+}
+
+fn get_data_from_excel(path: String, column_str: String) -> String {
+
+    if path.is_empty() || column_str.is_empty() {
+        return String::new();
+    }
+
+    let mut column_codes: HashMap<String, usize> = HashMap::new();
+    column_str.split('|').for_each(|code| {
+        column_codes.insert(code.to_string(), 0);
+    });
+
+    if column_codes.is_empty(){
+        return String::new();
+    }
+
+    let mut excel_data_array: Vec<ExcelData> = Vec::new();
+
+    let mut excel: Xlsx<_> = open_workbook(path).unwrap();
+    for sheet_name in excel.sheet_names(){
+        
+        println!("{}", sheet_name);
+        
+        if let Ok(r) = excel.worksheet_range(&sheet_name){
+            let mut rows: Vec<HashMap<String,String>> = Vec::new();
+            let mut find_head_row = false;
+            // println!("{}", r.rows().len());
+            for row in r.rows() {
+
+                if find_head_row {
+                    let mut row_data = HashMap::new();
+                    for row_idx in 0..row.len() {
+                        if let Some(key) = find_key_for_value(&column_codes, row_idx){
+                            row_data.insert(key, row[row_idx].to_string());
+                        }
+                    }
+
+                    rows.push(row_data);
+                }
+
+                if !find_head_row && row.len() >= column_codes.len(){
+                    let mut find_cell_count = 0;
+                    for row_idx in 0..row.len() {
+                        if column_codes.contains_key(&row[row_idx].to_string()){
+                            column_codes.insert(row[row_idx].to_string(), row_idx);
+                            find_cell_count = find_cell_count + 1; 
+                        }
+                    }
+
+                    find_head_row = find_cell_count == column_codes.len();
+                }
+            }
+
+            excel_data_array.push(ExcelData { sheet_name, rows });
+        }
+    }
+
+    serde_json::to_string(&excel_data_array).unwrap()
+}
+
 
 fn fake_bin(s: &str) -> String {
     s.chars()
